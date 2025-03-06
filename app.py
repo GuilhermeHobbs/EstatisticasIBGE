@@ -2,8 +2,15 @@ import pandas as pd
 import requests
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import display, clear_output
-import ipywidgets as widgets
+import streamlit as st
+import time
+
+# Set page configuration
+st.set_page_config(
+    page_title="Dashboard de Análise de Óbitos",
+    page_icon="📊",
+    layout="wide"
+)
 
 # Constants
 API_URL = "https://apisidra.ibge.gov.br/"
@@ -39,8 +46,9 @@ REGIOES_METROPOLITANAS = {
     '3501': 'São Paulo'
 }
 
-# Data cache dictionary - avoid repeating API calls
-data_cache = {}
+# Initialize session state to store data
+if 'data_cache' not in st.session_state:
+    st.session_state.data_cache = {}
 
 def consultar_obitos_casados(rm_id):
     """
@@ -49,21 +57,21 @@ def consultar_obitos_casados(rm_id):
     """
     # Check cache first
     cache_key = f"casados_{rm_id}"
-    if cache_key in data_cache:
-        return data_cache[cache_key]
+    if cache_key in st.session_state.data_cache:
+        return st.session_state.data_cache[cache_key]
     
     url = f"{API_URL}values/t/{TABELA}/v/{VARIAVEL}/p/{','.join(PERIODOS)}/c9832/{ESTADO_CIVIL_CASADO}/c1836/{NATUREZA_OBITO}/{NIVEL_TERRITORIAL}/{rm_id}/f/n"
     
-    print(f"Consultando API de ÓBITOS NÃO NATURAIS PARA CASADOS (código {rm_id})...")
+    st.info(f"Consultando API de ÓBITOS NÃO NATURAIS PARA CASADOS (código {rm_id})...")
     
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        data_cache[cache_key] = data
+        st.session_state.data_cache[cache_key] = data
         return data
     except requests.exceptions.RequestException as e:
-        print(f"Erro na consulta à API: {str(e)}")
+        st.error(f"Erro na consulta à API: {str(e)}")
         
         # Tentativa alternativa - usando N1 (Brasil)
         try:
@@ -71,11 +79,11 @@ def consultar_obitos_casados(rm_id):
             resp_alt = requests.get(url_alt)
             resp_alt.raise_for_status()
             data = resp_alt.json()
-            data_cache[cache_key] = data
-            print("Consulta alternativa bem-sucedida (dados do Brasil)")
+            st.session_state.data_cache[cache_key] = data
+            st.success("Consulta alternativa bem-sucedida (dados do Brasil)")
             return data
         except:
-            print("Consulta alternativa também falhou")
+            st.error("Consulta alternativa também falhou")
             return []
 
 def consultar_obitos_nao_casados(rm_id, estado_civil_codigo):
@@ -85,21 +93,21 @@ def consultar_obitos_nao_casados(rm_id, estado_civil_codigo):
     """
     # Check cache first
     cache_key = f"nao_casados_{rm_id}_{estado_civil_codigo}"
-    if cache_key in data_cache:
-        return data_cache[cache_key]
+    if cache_key in st.session_state.data_cache:
+        return st.session_state.data_cache[cache_key]
     
     url = f"{API_URL}values/t/{TABELA}/v/{VARIAVEL}/p/{','.join(PERIODOS)}/c9832/{estado_civil_codigo}/c1836/{NATUREZA_OBITO}/{NIVEL_TERRITORIAL}/{rm_id}/f/n"
     
-    print(f"Consultando API para estado civil código {estado_civil_codigo} (código de região {rm_id})...")
+    st.info(f"Consultando API para estado civil código {estado_civil_codigo} (código de região {rm_id})...")
     
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        data_cache[cache_key] = data
+        st.session_state.data_cache[cache_key] = data
         return data
     except requests.exceptions.RequestException as e:
-        print(f"Erro na consulta à API: {str(e)}")
+        st.error(f"Erro na consulta à API: {str(e)}")
         return []
 
 def processar_dados(data, tipo="casados"):
@@ -156,12 +164,11 @@ def criar_grafico_comparativo(df_casados, df_nao_casados, rm_nome, rm_codigo):
     entre pessoas casadas e não casadas ao longo dos anos.
     """
     if df_casados.empty and df_nao_casados.empty:
-        print("Sem dados suficientes para criar gráfico")
+        st.warning("Sem dados suficientes para criar gráfico")
         return
     
     # Criar figura limpa com fundo branco
-    plt.figure(figsize=(12, 6), facecolor='white')
-    ax = plt.gca()
+    fig, ax = plt.subplots(figsize=(12, 6), facecolor='white')
     ax.set_facecolor('white')
     
     # Definir valores mínimo e máximo para o eixo y
@@ -295,7 +302,7 @@ def criar_grafico_comparativo(df_casados, df_nao_casados, rm_nome, rm_codigo):
                        bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.2'))
     
     plt.tight_layout()
-    plt.show()
+    return fig
 
 def criar_grafico_razao(df_casados, df_nao_casados, rm_nome, rm_codigo):
     """
@@ -303,8 +310,8 @@ def criar_grafico_razao(df_casados, df_nao_casados, rm_nome, rm_codigo):
     de não casados e casados ao longo dos anos.
     """
     if df_casados.empty or df_nao_casados.empty:
-        print("Sem dados suficientes para criar gráfico de razão")
-        return
+        st.warning("Sem dados suficientes para criar gráfico de razão")
+        return None
     
     # Mesclar os dataframes por ano
     df_merged = pd.merge(df_casados, df_nao_casados, on='Ano', suffixes=('_casados', '_nao_casados'))
@@ -316,8 +323,7 @@ def criar_grafico_razao(df_casados, df_nao_casados, rm_nome, rm_codigo):
     df_merged = df_merged.sort_values('Ano')
     
     # Criar figura
-    plt.figure(figsize=(12, 6), facecolor='white')
-    ax = plt.gca()
+    fig, ax = plt.subplots(figsize=(12, 6), facecolor='white')
     ax.set_facecolor('white')
     
     # Plotar razão
@@ -357,20 +363,28 @@ def criar_grafico_razao(df_casados, df_nao_casados, rm_nome, rm_codigo):
     ax.spines['right'].set_visible(False)
     
     plt.tight_layout()
-    plt.show()
+    return fig
 
 def carregar_dados_regiao(rm_id, rm_nome):
     """
     Carrega e processa todos os dados para uma região metropolitana.
     """
-    print(f"Carregando dados para {rm_nome}...")
+    st.info(f"Carregando dados para {rm_nome}...")
+    
+    # Add a progress bar
+    progress_bar = st.progress(0)
     
     # Consultar dados de óbitos para casados
     data_casados = consultar_obitos_casados(rm_id)
     df_casados = processar_dados(data_casados)
+    progress_bar.progress(50)
     
     # Para os não casados, vamos buscar cada categoria e somá-las
     df_nao_casados_total = pd.DataFrame()
+    
+    # Calculate progress step for each category
+    progress_step = 50 / len(ESTADO_CIVIL_NAO_CASADOS)
+    current_progress = 50
     
     for codigo in ESTADO_CIVIL_NAO_CASADOS:
         data_grupo = consultar_obitos_nao_casados(rm_id, codigo)
@@ -385,145 +399,111 @@ def carregar_dados_regiao(rm_id, rm_nome):
                 df_merged['Valor'] = df_merged['Valor_x'].fillna(0) + df_merged['Valor_y'].fillna(0)
                 df_merged['Unidade'] = df_merged['Unidade_x'].fillna(df_merged['Unidade_y'])
                 df_nao_casados_total = df_merged[['Ano', 'Valor', 'Unidade']].copy()
-
+                
+        current_progress += progress_step
+        progress_bar.progress(min(int(current_progress), 100))
+    
+    progress_bar.progress(100)
+    time.sleep(0.5)  # Small delay for UI feedback
+    progress_bar.empty()  # Remove progress bar
+    
     return df_casados, df_nao_casados_total
 
-# Criando a interface com ipywidgets para uso no Colab
-def criar_dashboard_ipywidgets():
-    # Criar um dicionário simples para o dropdown
-    regiao_nomes = {} 
-    for k, v in REGIOES_METROPOLITANAS.items():
-        regiao_nomes[v] = k  # Aqui invertemos para mapear nome -> código
+# Streamlit app main function
+def main():
+    # Title and subtitle
+    st.title("📊 Dashboard de Análise de Óbitos Não Naturais")
+    st.subheader("Comparação entre pessoas casadas e não casadas (2003-2022)")
     
-    # Lista ordenada de nomes para o dropdown
+    # Sidebar for region selection
+    st.sidebar.header("Configurações")
+    
+    # Create a list of region names sorted alphabetically
     nomes_ordenados = sorted(REGIOES_METROPOLITANAS.values())
     
-    # Criar dropdown para seleção da região
-    dropdown_regioes = widgets.Dropdown(
-        options=nomes_ordenados,
-        description='Região:',
-        style={'description_width': 'initial'},
-        layout=widgets.Layout(width='70%')
+    # Create a mapping from names to codes
+    regiao_nomes = {v: k for k, v in REGIOES_METROPOLITANAS.items()}
+    
+    # Region selection dropdown
+    rm_nome = st.sidebar.selectbox(
+        "Selecione a Região Metropolitana:",
+        options=nomes_ordenados
     )
     
-    # Criar botão para carregar dados
-    botao_carregar = widgets.Button(
-        description='Carregar Dados',
-        button_style='info',
-        layout=widgets.Layout(width='200px')
-    )
+    rm_id = regiao_nomes[rm_nome]
     
-    # Criar abas para os diferentes gráficos
-    tabs = widgets.Tab(children=[widgets.Output(), widgets.Output(), widgets.Output()])
-    tabs.set_title(0, 'Evolução Temporal')
-    tabs.set_title(1, 'Razão ao Longo do Tempo')
-    tabs.set_title(2, 'Dados Brutos')
-    
-    # Output para mensagens
-    output_mensagens = widgets.Output()
-    
-    # Função chamada quando o botão é clicado
-    def on_botao_carregar_clicked(b):
-        with output_mensagens:
-            clear_output()
-            rm_nome = dropdown_regioes.value  # Agora pega o nome diretamente
-            rm_id = regiao_nomes[rm_nome]  # Obtém o ID a partir do nome
-            print(f"Carregando dados para {rm_nome} (Código {rm_id})...")
-            
-            # Limpar abas
-            for i in range(3):
-                with tabs.children[i]:
-                    clear_output()
-            
-            # Carregar dados
+    # Load data button
+    if st.sidebar.button("Carregar Dados", type="primary"):
+        with st.spinner(f"Carregando dados para {rm_nome}..."):
             df_casados, df_nao_casados = carregar_dados_regiao(rm_id, rm_nome)
             
-            # Verificar se há dados disponíveis
+            # Check if data is available
             if df_casados.empty and df_nao_casados.empty:
-                print(f"Não há dados disponíveis para {rm_nome}. Por favor, selecione outra região.")
-                return
-            
-            # Atualizar aba de evolução temporal
-            with tabs.children[0]:
-                print(f"## Evolução de Óbitos Não Naturais em {rm_nome}")
-                criar_grafico_comparativo(df_casados, df_nao_casados, rm_nome, rm_id)
-                print("""
-                **Sobre este gráfico:**
-                * A linha vermelha representa óbitos não naturais entre pessoas casadas
-                * A linha azul representa óbitos não naturais entre pessoas não casadas (solteiros, viúvos, divorciados, etc.)
-                * As linhas pontilhadas mostram a tendência linear para cada grupo
-                * Valores são mostrados a cada 3 anos para melhor visualização
-                """)
-            
-            # Atualizar aba de razão
-            with tabs.children[1]:
-                if not df_casados.empty and not df_nao_casados.empty:
-                    print(f"## Razão entre Óbitos Não Naturais (Não Casados/Casados) em {rm_nome}")
-                    criar_grafico_razao(df_casados, df_nao_casados, rm_nome, rm_id)
-                    print("""
-                    **Sobre este gráfico:**
-                    * A linha roxa mostra a razão entre óbitos não naturais de pessoas não casadas e casadas
-                    * Valores acima de 1 indicam mais óbitos entre não casados do que casados
-                    * A linha vermelha tracejada marca o ponto de igualdade (razão = 1)
-                    * Este gráfico ajuda a identificar diferenças proporcionais entre os grupos
-                    """)
-                else:
-                    print("Não há dados suficientes para calcular a razão.")
-            
-            # Atualizar aba de dados brutos
-            with tabs.children[2]:
-                print("## Dados Brutos")
-                print("\n**Óbitos Não Naturais - Pessoas Casadas:**")
-                if not df_casados.empty:
-                    display(df_casados.sort_values('Ano'))
-                else:
-                    print("Não há dados disponíveis para pessoas casadas.")
+                st.error(f"Não há dados disponíveis para {rm_nome}. Por favor, selecione outra região.")
+            else:
+                # Create tabs for different visualizations
+                tab1, tab2, tab3 = st.tabs(["Evolução Temporal", "Razão ao Longo do Tempo", "Dados Brutos"])
                 
-                print("\n**Óbitos Não Naturais - Pessoas Não Casadas:**")
-                if not df_nao_casados.empty:
-                    display(df_nao_casados.sort_values('Ano'))
-                else:
-                    print("Não há dados disponíveis para pessoas não casadas.")
-            
-            # Mensagem de conclusão
-            print(f"Dados carregados com sucesso para {rm_nome}.")
-            # Exibir a primeira aba
-            tabs.selected_index = 0
+                with tab1:
+                    st.header(f"Evolução de Óbitos Não Naturais em {rm_nome}")
+                    fig_comp = criar_grafico_comparativo(df_casados, df_nao_casados, rm_nome, rm_id)
+                    if fig_comp:
+                        st.pyplot(fig_comp)
+                    
+                    st.markdown("""
+                    **Sobre este gráfico:**
+                    * A linha vermelha representa óbitos não naturais entre pessoas casadas
+                    * A linha azul representa óbitos não naturais entre pessoas não casadas (solteiros, viúvos, divorciados, etc.)
+                    * As linhas pontilhadas mostram a tendência linear para cada grupo
+                    * Valores são mostrados a cada 3 anos para melhor visualização
+                    """)
+                
+                with tab2:
+                    if not df_casados.empty and not df_nao_casados.empty:
+                        st.header(f"Razão entre Óbitos Não Naturais (Não Casados/Casados) em {rm_nome}")
+                        fig_razao = criar_grafico_razao(df_casados, df_nao_casados, rm_nome, rm_id)
+                        if fig_razao:
+                            st.pyplot(fig_razao)
+                        
+                        st.markdown("""
+                        **Sobre este gráfico:**
+                        * A linha roxa mostra a razão entre óbitos não naturais de pessoas não casadas e casadas
+                        * Valores acima de 1 indicam mais óbitos entre não casados do que casados
+                        * A linha vermelha tracejada marca o ponto de igualdade (razão = 1)
+                        * Este gráfico ajuda a identificar diferenças proporcionais entre os grupos
+                        """)
+                    else:
+                        st.warning("Não há dados suficientes para calcular a razão.")
+                
+                with tab3:
+                    st.header("Dados Brutos")
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("Óbitos Não Naturais - Pessoas Casadas")
+                        if not df_casados.empty:
+                            st.dataframe(df_casados.sort_values('Ano'), use_container_width=True)
+                        else:
+                            st.info("Não há dados disponíveis para pessoas casadas.")
+                    
+                    with col2:
+                        st.subheader("Óbitos Não Naturais - Pessoas Não Casadas")
+                        if not df_nao_casados.empty:
+                            st.dataframe(df_nao_casados.sort_values('Ano'), use_container_width=True)
+                        else:
+                            st.info("Não há dados disponíveis para pessoas não casadas.")
+    else:
+        # Initial message when app is loaded
+        st.info("👈 Selecione uma região metropolitana no painel lateral e clique em 'Carregar Dados'.")
     
-    # Conectar função ao botão
-    botao_carregar.on_click(on_botao_carregar_clicked)
-    
-    # Layout do dashboard
-    titulo = widgets.HTML("<h2>📊 Dashboard de Análise de Óbitos Não Naturais</h2>")
-    subtitulo = widgets.HTML("<h3>Comparação entre pessoas casadas e não casadas (2003-2022)</h3>")
-    
-    controles = widgets.VBox([
-        widgets.HBox([dropdown_regioes, botao_carregar]),
-        output_mensagens
-    ])
-    
-    # Informações da fonte de dados
-    fonte = widgets.HTML("""
-    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-top: 20px;">
-        <p><strong>Fonte dos dados:</strong></p>
-        <ul>
-            <li>IBGE - Pesquisa Estatísticas do Registro Civil</li>
-            <li>Tabela 2683 - Óbitos, por estado civil, natureza do óbito...</li>
-            <li>Dados filtrados para óbitos não naturais</li>
-        </ul>
-    </div>
+    # Information about the data source
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Fonte dos dados:")
+    st.sidebar.markdown("""
+    * IBGE - Pesquisa Estatísticas do Registro Civil
+    * Tabela 2683 - Óbitos, por estado civil, natureza do óbito...
+    * Dados filtrados para óbitos não naturais
     """)
-    
-    # Montar dashboard
-    display(titulo)
-    display(subtitulo)
-    display(controles)
-    display(tabs)
-    display(fonte)
-    
-    # Mensagem inicial
-    with output_mensagens:
-        print("Selecione uma região metropolitana e clique em 'Carregar Dados'.")
 
-# Executar o dashboard
-criar_dashboard_ipywidgets()
+if __name__ == "__main__":
+    main()
